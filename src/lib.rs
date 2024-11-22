@@ -4,6 +4,7 @@
 use bytes::BytesMut;
 use prost::Message;
 use std::io::Write;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tracing::field::Field;
 use tracing::field::Visit;
@@ -236,6 +237,9 @@ where
         if self.config.debug_annotations {
             attrs.record(&mut debug_annotations);
         }
+        if let Some(name_override) = debug_annotations.name_override.clone() {
+            span.extensions_mut().insert(name_override);
+        }
 
         let mut packet = idl::TracePacket::default();
         let thread_track_uuid = THREAD_TRACK_UUID.with(|id| id.load(Ordering::Relaxed));
@@ -323,7 +327,11 @@ where
             return;
         };
 
-        let debug_annotations = DebugAnnotations::default();
+        let name_override = span.extensions_mut().remove::<NameOverride>();
+        let debug_annotations = DebugAnnotations {
+            name_override,
+            ..Default::default()
+        };
 
         let mut packet = idl::TracePacket::default();
         let meta = span.metadata();
@@ -415,7 +423,18 @@ fn create_event(
 #[derive(Default)]
 struct DebugAnnotations {
     annotations: Vec<idl::DebugAnnotation>,
-    name_override: Option<String>,
+    name_override: Option<NameOverride>,
+}
+
+#[derive(Clone)]
+struct NameOverride(String);
+
+impl Deref for NameOverride {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 macro_rules! impl_record {
@@ -457,7 +476,7 @@ impl Visit for DebugAnnotations {
 
     fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "name_override" {
-            self.name_override = Some(value.to_owned());
+            self.name_override = Some(NameOverride(value.to_owned()));
         }
         self.record_str_real(field, value);
     }
