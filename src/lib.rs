@@ -393,7 +393,7 @@ fn create_event(
 ) -> idl::TrackEvent {
     let mut event = idl::TrackEvent::default();
     event.track_uuid = Some(track_uuid);
-    if let Some(name) = name {
+    if let Some(name) = debug_annotations.name_override.as_deref().or(name) {
         event.name_field = Some(idl::track_event::NameField::Name(name.to_string()));
     }
     if let Some(t) = r#type {
@@ -415,6 +415,7 @@ fn create_event(
 #[derive(Default)]
 struct DebugAnnotations {
     annotations: Vec<idl::DebugAnnotation>,
+    name_override: Option<String>,
 }
 
 macro_rules! impl_record {
@@ -442,14 +443,24 @@ macro_rules! impl_record {
     };
 }
 
+impl DebugAnnotations {
+    impl_record!(record_str_real, &str, StringValue, String::from);
+}
+
 impl Visit for DebugAnnotations {
     impl_record!(record_bool, bool, BoolValue);
-    impl_record!(record_str, &str, StringValue, String::from);
     impl_record!(record_f64, f64, DoubleValue);
     impl_record!(record_i64, i64, IntValue);
     impl_record!(record_i128, i128, StringValue, |v: i128| v.to_string());
     impl_record!(record_u128, u128, StringValue, |v: u128| v.to_string());
     impl_record!(record_u64, u64, IntValue, |v: u64| v as i64);
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "name_override" {
+            self.name_override = Some(value.to_owned());
+        }
+        self.record_str_real(field, value);
+    }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
         let mut annotation = idl::DebugAnnotation::default();
